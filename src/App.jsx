@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-const STORAGE_KEY = 'taskmaster_pro_v1'
+const STORAGE_KEY = 'taskquil_v1'
 
 const defaultData = {
   tasks: [],
@@ -84,9 +84,17 @@ export default function App() {
       )
     }
 
-    if (statusFilter !== 'ALL') list = list.filter((t) => t.status === statusFilter)
-    if (priorityFilter !== 'ALL') list = list.filter((t) => t.priority === priorityFilter)
-    if (projectFilter !== 'ALL') list = list.filter((t) => t.projectId === projectFilter)
+    if (statusFilter !== 'ALL') {
+      list = list.filter((t) => t.status === statusFilter)
+    }
+
+    if (priorityFilter !== 'ALL') {
+      list = list.filter((t) => t.priority === priorityFilter)
+    }
+
+    if (projectFilter !== 'ALL') {
+      list = list.filter((t) => t.projectId === projectFilter)
+    }
 
     list.sort((a, b) => {
       if (sortBy === 'due') {
@@ -95,13 +103,16 @@ export default function App() {
         if (!b.dueDate) return -1
         return a.dueDate.localeCompare(b.dueDate)
       }
+
       if (sortBy === 'priority') {
         const rank = { HIGH: 3, MEDIUM: 2, LOW: 1 }
         return rank[b.priority] - rank[a.priority]
       }
+
       if (sortBy === 'created') {
         return new Date(b.createdAt) - new Date(a.createdAt)
       }
+
       return a.title.localeCompare(b.title)
     })
 
@@ -261,8 +272,8 @@ export default function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Productivity Dashboard</p>
-          <h1>TaskMaster Pro</h1>
-          <p className="subtext">Modern task planner with projects, priorities, and clean focus.</p>
+          <h1>Taskquil</h1>
+          <p className="subtext">A clean planner for tasks, projects, and focused work.</p>
         </div>
 
         <div className="topbar-actions">
@@ -274,10 +285,22 @@ export default function App() {
       {toast && <div className="toast">{toast}</div>}
 
       <section className="stats-grid">
-        <div className="stat-card"><span>Total Tasks</span><strong>{stats.total}</strong></div>
-        <div className="stat-card"><span>Active</span><strong>{stats.active}</strong></div>
-        <div className="stat-card"><span>Completed</span><strong>{stats.done}</strong></div>
-        <div className="stat-card"><span>Overdue</span><strong>{stats.overdue}</strong></div>
+        <div className="stat-card">
+          <span>Total Tasks</span>
+          <strong>{stats.total}</strong>
+        </div>
+        <div className="stat-card">
+          <span>Active</span>
+          <strong>{stats.active}</strong>
+        </div>
+        <div className="stat-card">
+          <span>Completed</span>
+          <strong>{stats.done}</strong>
+        </div>
+        <div className="stat-card">
+          <span>Overdue</span>
+          <strong>{stats.overdue}</strong>
+        </div>
       </section>
 
       <main className="content-grid">
@@ -286,7 +309,12 @@ export default function App() {
             <h3>Filters</h3>
 
             <label className="label">Search</label>
-            <input className="input" placeholder="Search tasks..." value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input
+              className="input"
+              placeholder="Search tasks..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
 
             <label className="label">Status</label>
             <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -308,7 +336,9 @@ export default function App() {
             <select className="input" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
               <option value="ALL">All Projects</option>
               {data.projects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
               ))}
             </select>
 
@@ -327,15 +357,28 @@ export default function App() {
             <div className="project-list">
               {data.projects.map((project) => (
                 <div key={project.id} className="project-chip">
-                  <span className="project-dot" style={{ backgroundColor: project.color }} />
+                  <span
+                    className="project-dot"
+                    style={{ backgroundColor: project.color }}
+                  />
                   <span>{project.name}</span>
                 </div>
               ))}
             </div>
 
             <form className="project-form" onSubmit={addProject}>
-              <input className="input" placeholder="New project" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} />
-              <input className="color-input" type="color" value={newProjectColor} onChange={(e) => setNewProjectColor(e.target.value)} />
+              <input
+                className="input"
+                placeholder="New project"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+              />
+              <input
+                className="color-input"
+                type="color"
+                value={newProjectColor}
+                onChange={(e) => setNewProjectColor(e.target.value)}
+              />
               <button className="secondary-btn" type="submit">Add Project</button>
             </form>
           </div>
@@ -352,8 +395,8 @@ export default function App() {
           {filteredTasks.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">✦</div>
-              <h3>No tasks found</h3>
-              <p>Create a task or change your filters.</p>
+              <h3>No tasks yet</h3>
+              <p>Start by creating your first task in Taskquil.</p>
               <button className="primary-btn" onClick={openCreateModal}>Create First Task</button>
             </div>
           ) : (
@@ -366,12 +409,18 @@ export default function App() {
                     <div className="task-main">
                       <div className="task-top">
                         <label className="check-wrap">
-                          <input type="checkbox" checked={task.status === 'DONE'} onChange={() => toggleDone(task.id)} />
+                          <input
+                            type="checkbox"
+                            checked={task.status === 'DONE'}
+                            onChange={() => toggleDone(task.id)}
+                          />
                           <span className="custom-check" />
                         </label>
 
                         <div className="task-text">
-                          <h3 className={task.status === 'DONE' ? 'done' : ''}>{task.title}</h3>
+                          <h3 className={task.status === 'DONE' ? 'done' : ''}>
+                            {task.title}
+                          </h3>
                           {task.description && <p>{task.description}</p>}
                         </div>
                       </div>
@@ -382,7 +431,10 @@ export default function App() {
 
                         {project && (
                           <span className="project-badge">
-                            <span className="project-dot" style={{ backgroundColor: project.color }} />
+                            <span
+                              className="project-dot"
+                              style={{ backgroundColor: project.color }}
+                            />
                             {project.name}
                           </span>
                         )}
@@ -396,8 +448,12 @@ export default function App() {
                     </div>
 
                     <div className="task-actions">
-                      <button className="ghost-btn small" onClick={() => openEditModal(task)}>Edit</button>
-                      <button className="danger-btn small" onClick={() => deleteTask(task.id)}>Delete</button>
+                      <button className="ghost-btn small" onClick={() => openEditModal(task)}>
+                        Edit
+                      </button>
+                      <button className="danger-btn small" onClick={() => deleteTask(task.id)}>
+                        Delete
+                      </button>
                     </div>
                   </article>
                 )
@@ -421,23 +477,42 @@ export default function App() {
             <form className="task-form" onSubmit={saveTask}>
               <div>
                 <label className="label">Title</label>
-                <input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Task title" />
+                <input
+                  className="input"
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="Task title"
+                />
               </div>
 
               <div>
                 <label className="label">Description</label>
-                <textarea className="input textarea" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Write a short description..." />
+                <textarea
+                  className="input textarea"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  placeholder="Write a short description..."
+                />
               </div>
 
               <div className="form-grid">
                 <div>
                   <label className="label">Due Date</label>
-                  <input className="input" type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+                  <input
+                    className="input"
+                    type="date"
+                    value={form.dueDate}
+                    onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                  />
                 </div>
 
                 <div>
                   <label className="label">Priority</label>
-                  <select className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                  <select
+                    className="input"
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                  >
                     <option value="HIGH">High</option>
                     <option value="MEDIUM">Medium</option>
                     <option value="LOW">Low</option>
@@ -446,7 +521,11 @@ export default function App() {
 
                 <div>
                   <label className="label">Status</label>
-                  <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <select
+                    className="input"
+                    value={form.status}
+                    onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  >
                     <option value="TODO">To Do</option>
                     <option value="IN_PROGRESS">In Progress</option>
                     <option value="DONE">Done</option>
@@ -455,16 +534,24 @@ export default function App() {
 
                 <div>
                   <label className="label">Project</label>
-                  <select className="input" value={form.projectId} onChange={(e) => setForm({ ...form, projectId: e.target.value })}>
+                  <select
+                    className="input"
+                    value={form.projectId}
+                    onChange={(e) => setForm({ ...form, projectId: e.target.value })}
+                  >
                     {data.projects.map((project) => (
-                      <option key={project.id} value={project.id}>{project.name}</option>
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
               <div className="modal-actions">
-                <button type="button" className="ghost-btn" onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="button" className="ghost-btn" onClick={() => setShowModal(false)}>
+                  Cancel
+                </button>
                 <button type="submit" className="primary-btn">
                   {editingTaskId ? 'Save Changes' : 'Create Task'}
                 </button>
