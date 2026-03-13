@@ -1,14 +1,46 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 
+function formatDate(dateString) {
+  if (!dateString) return ''
+  const date = new Date(dateString + 'T00:00:00')
+  return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function getDueState(dateString, status) {
+  if (!dateString || status === 'DONE') return 'normal'
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const due = new Date(dateString + 'T00:00:00')
+  due.setHours(0, 0, 0, 0)
+
+  if (due.getTime() === today.getTime()) return 'today'
+  if (due < today) return 'overdue'
+  return 'upcoming'
+}
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [authMode, setAuthMode] = useState('login')
+
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [priorityFilter, setPriorityFilter] = useState('ALL')
+
+  const [editingTaskId, setEditingTaskId] = useState(null)
+  const [toast, setToast] = useState({ show: false, text: '', type: 'info' })
 
   const [form, setForm] = useState({
     title: '',
@@ -18,6 +50,18 @@ export default function App() {
     status: 'TODO',
     projectName: '',
   })
+
+  function showToast(text, type = 'info') {
+    setToast({ show: true, text, type })
+  }
+
+  useEffect(() => {
+    if (!toast.show) return
+    const timer = setTimeout(() => {
+      setToast({ show: false, text: '', type: 'info' })
+    }, 2500)
+    return () => clearTimeout(timer)
+  }, [toast])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -60,7 +104,7 @@ export default function App() {
       .order('created_at', { ascending: false })
 
     if (error) {
-      alert(error.message)
+      showToast(error.message, 'error')
       return
     }
 
@@ -71,7 +115,7 @@ export default function App() {
     e.preventDefault()
 
     if (!email || !password) {
-      alert('Email and password are required')
+      showToast('Email and password are required', 'error')
       return
     }
 
@@ -82,9 +126,9 @@ export default function App() {
       })
 
       if (error) {
-        alert(error.message)
+        showToast(error.message, 'error')
       } else {
-        alert('Signup successful. Now log in.')
+        showToast('Signup successful. Now log in.', 'success')
         setAuthMode('login')
       }
       return
@@ -95,18 +139,68 @@ export default function App() {
       password,
     })
 
-    if (error) alert(error.message)
+    if (error) showToast(error.message, 'error')
   }
 
   async function logout() {
     await supabase.auth.signOut()
   }
 
-  async function addTask(e) {
+  function resetForm() {
+    setForm({
+      title: '',
+      description: '',
+      dueDate: '',
+      priority: 'MEDIUM',
+      status: 'TODO',
+      projectName: '',
+    })
+    setEditingTaskId(null)
+  }
+
+  function startEdit(task) {
+    setEditingTaskId(task.id)
+    setForm({
+      title: task.title || '',
+      description: task.description || '',
+      dueDate: task.due_date || '',
+      priority: task.priority || 'MEDIUM',
+      status: task.status || 'TODO',
+      projectName: task.project_name || '',
+    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  async function saveTask(e) {
     e.preventDefault()
 
     if (!form.title.trim() || !user) {
-      alert('Task title is required')
+      showToast('Task title is required', 'error')
+      return
+    }
+
+    if (editingTaskId) {
+      const { error } = await supabase
+        .from('tasks')
+        .update({
+          title: form.title.trim(),
+          description: form.description.trim(),
+          due_date: form.dueDate || null,
+          priority: form.priority,
+          status: form.status,
+          project_name: form.projectName.trim(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingTaskId)
+
+      if (error) {
+        showToast(error.message, 'error')
+        return
+      }
+
+      showToast('Task updated', 'success')
+      resetForm()
+      fetchTasks(user.id)
       return
     }
 
@@ -121,28 +215,30 @@ export default function App() {
     })
 
     if (error) {
-      alert(error.message)
+      showToast(error.message, 'error')
       return
     }
 
-    setForm({
-      title: '',
-      description: '',
-      dueDate: '',
-      priority: 'MEDIUM',
-      status: 'TODO',
-      projectName: '',
-    })
-
+    showToast('Task created', 'success')
+    resetForm()
     fetchTasks(user.id)
   }
 
   async function deleteTask(id) {
+    const ok = window.confirm('Delete this task?')
+    if (!ok) return
+
     const { error } = await supabase.from('tasks').delete().eq('id', id)
 
     if (error) {
-      alert(error.message)
+      showToast(error.message, 'error')
       return
+    }
+
+    showToast('Task deleted', 'success')
+
+    if (editingTaskId === id) {
+      resetForm()
     }
 
     fetchTasks(user.id)
@@ -160,12 +256,29 @@ export default function App() {
       .eq('id', task.id)
 
     if (error) {
-      alert(error.message)
+      showToast(error.message, 'error')
       return
     }
 
+    showToast(nextStatus === 'DONE' ? 'Task completed' : 'Task marked active', 'success')
     fetchTasks(user.id)
   }
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      const q = search.trim().toLowerCase()
+      const matchesSearch =
+        !q ||
+        task.title.toLowerCase().includes(q) ||
+        (task.description || '').toLowerCase().includes(q) ||
+        (task.project_name || '').toLowerCase().includes(q)
+
+      const matchesStatus = statusFilter === 'ALL' || task.status === statusFilter
+      const matchesPriority = priorityFilter === 'ALL' || task.priority === priorityFilter
+
+      return matchesSearch && matchesStatus && matchesPriority
+    })
+  }, [tasks, search, statusFilter, priorityFilter])
 
   const stats = useMemo(() => {
     const total = tasks.length
@@ -175,59 +288,43 @@ export default function App() {
   }, [tasks])
 
   if (loading) {
-    return (
-      <div style={{ minHeight: '100vh', background: '#0b1020', color: 'white', padding: 40 }}>
-        Loading...
-      </div>
-    )
+    return <div className="cloud-shell"><div className="auth-card">Loading...</div></div>
   }
 
   if (!session) {
     return (
-      <div style={{ minHeight: '100vh', background: '#0b1020', color: 'white', padding: 24 }}>
-        <div
-          style={{
-            maxWidth: 460,
-            margin: '60px auto',
-            padding: 24,
-            border: '1px solid #334155',
-            borderRadius: 16,
-            background: '#111827',
-          }}
-        >
-          <p style={{ color: '#c4b5fd', textTransform: 'uppercase', letterSpacing: '.14em' }}>
-            Taskquil
+      <div className="cloud-shell">
+        <div className="auth-card">
+          <p className="auth-brand">Taskquil</p>
+          <h1 className="auth-title">
+            {authMode === 'signup' ? 'Create account' : 'Welcome back'}
+          </h1>
+          <p className="auth-subtitle">
+            Organize tasks, track deadlines, and stay focused.
           </p>
-          <h1>{authMode === 'signup' ? 'Create account' : 'Login'}</h1>
 
-          <form onSubmit={handleAuth} style={{ display: 'grid', gap: 12 }}>
+          <form onSubmit={handleAuth} className="auth-form">
             <input
-              style={{ padding: 12, borderRadius: 12 }}
+              className="cloud-input"
               type="email"
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
             <input
-              style={{ padding: 12, borderRadius: 12 }}
+              className="cloud-input"
               type="password"
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <button style={{ padding: 12, borderRadius: 12 }} type="submit">
+            <button className="primary-btn big-btn" type="submit">
               {authMode === 'signup' ? 'Sign Up' : 'Login'}
             </button>
           </form>
 
           <button
-            style={{
-              marginTop: 12,
-              background: 'transparent',
-              color: '#93c5fd',
-              border: 'none',
-              cursor: 'pointer',
-            }}
+            className="text-btn"
             onClick={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')}
           >
             {authMode === 'signup'
@@ -240,92 +337,72 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0b1020', color: 'white', padding: 24 }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 16,
-            flexWrap: 'wrap',
-          }}
-        >
+    <div className="cloud-shell">
+      <div className="bg-orb orb-a" />
+      <div className="bg-orb orb-b" />
+      <div className="bg-orb orb-c" />
+
+      {toast.show && (
+        <div className={`toast toast-${toast.type}`}>
+          {toast.text}
+        </div>
+      )}
+
+      <div className="cloud-container">
+        <header className="cloud-header">
           <div>
-            <p style={{ color: '#c4b5fd', textTransform: 'uppercase', letterSpacing: '.14em' }}>
-              Taskquil
-            </p>
-            <h1 style={{ marginTop: 0 }}>Your Cloud Tasks</h1>
-            <p style={{ color: '#94a3b8' }}>{user.email}</p>
+            <p className="auth-brand">Taskquil</p>
+            <h1 className="dashboard-title">Your Cloud Workspace</h1>
+            <p className="dashboard-subtitle">{user.email}</p>
           </div>
 
-          <button onClick={logout} style={{ padding: 12, borderRadius: 12 }}>
+          <button className="secondary-btn" onClick={logout}>
             Logout
           </button>
-        </div>
+        </header>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 12,
-            margin: '20px 0',
-          }}
-        >
-          <div style={{ padding: 16, border: '1px solid #334155', borderRadius: 16 }}>
-            Total: {stats.total}
+        <section className="stats-row">
+          <div className="stat-box">
+            <span>Total Tasks</span>
+            <strong>{stats.total}</strong>
           </div>
-          <div style={{ padding: 16, border: '1px solid #334155', borderRadius: 16 }}>
-            Active: {stats.active}
+          <div className="stat-box">
+            <span>Active</span>
+            <strong>{stats.active}</strong>
           </div>
-          <div style={{ padding: 16, border: '1px solid #334155', borderRadius: 16 }}>
-            Done: {stats.done}
+          <div className="stat-box">
+            <span>Completed</span>
+            <strong>{stats.done}</strong>
           </div>
-        </div>
+        </section>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '360px 1fr',
-            gap: 20,
-          }}
-        >
-          <form
-            onSubmit={addTask}
-            style={{
-              padding: 20,
-              border: '1px solid #334155',
-              borderRadius: 16,
-              display: 'grid',
-              gap: 12,
-              background: '#111827',
-            }}
-          >
-            <h2>New Task</h2>
+        <main className="cloud-grid">
+          <form onSubmit={saveTask} className="panel card-form">
+            <h2>{editingTaskId ? 'Edit Task' : 'New Task'}</h2>
 
             <input
-              style={{ padding: 12, borderRadius: 12 }}
+              className="cloud-input"
               placeholder="Title"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
 
             <textarea
-              style={{ padding: 12, borderRadius: 12, minHeight: 120 }}
+              className="cloud-input cloud-textarea"
               placeholder="Description"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
 
             <input
-              style={{ padding: 12, borderRadius: 12 }}
+              className="cloud-input"
               type="date"
               value={form.dueDate}
               onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
             />
 
             <select
-              style={{ padding: 12, borderRadius: 12 }}
+              className="cloud-input"
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
             >
@@ -335,7 +412,7 @@ export default function App() {
             </select>
 
             <select
-              style={{ padding: 12, borderRadius: 12 }}
+              className="cloud-input"
               value={form.status}
               onChange={(e) => setForm({ ...form, status: e.target.value })}
             >
@@ -345,69 +422,130 @@ export default function App() {
             </select>
 
             <input
-              style={{ padding: 12, borderRadius: 12 }}
+              className="cloud-input"
               placeholder="Project name"
               value={form.projectName}
               onChange={(e) => setForm({ ...form, projectName: e.target.value })}
             />
 
-            <button style={{ padding: 12, borderRadius: 12 }} type="submit">
-              Create Task
-            </button>
+            <div className="form-actions">
+              <button className="primary-btn big-btn" type="submit">
+                {editingTaskId ? 'Save Changes' : 'Create Task'}
+              </button>
+
+              {editingTaskId && (
+                <button className="secondary-btn" type="button" onClick={resetForm}>
+                  Cancel Edit
+                </button>
+              )}
+            </div>
           </form>
 
-          <div
-            style={{
-              padding: 20,
-              border: '1px solid #334155',
-              borderRadius: 16,
-              background: '#111827',
-            }}
-          >
-            <h2>Your Tasks</h2>
+          <section className="panel">
+            <div className="panel-top">
+              <h2>Your Tasks</h2>
+              <span className="task-count">{filteredTasks.length} showing</span>
+            </div>
 
-            {tasks.length === 0 ? (
-              <p style={{ color: '#94a3b8' }}>No tasks yet.</p>
+            <div className="filters-row">
+              <input
+                className="cloud-input"
+                placeholder="Search tasks..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+
+              <select
+                className="cloud-input"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="ALL">All Status</option>
+                <option value="TODO">To Do</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="DONE">Done</option>
+              </select>
+
+              <select
+                className="cloud-input"
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+              >
+                <option value="ALL">All Priority</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
+              </select>
+            </div>
+
+            {filteredTasks.length === 0 ? (
+              <div className="empty-box">
+                <div className="empty-icon">✦</div>
+                <h3>No matching tasks</h3>
+                <p>Try changing your search or filters.</p>
+              </div>
             ) : (
-              <div style={{ display: 'grid', gap: 12 }}>
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    style={{ border: '1px solid #334155', borderRadius: 14, padding: 14 }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        gap: 12,
-                        flexWrap: 'wrap',
-                      }}
-                    >
-                      <div>
-                        <h3 style={{ margin: 0 }}>{task.title}</h3>
-                        {task.description && (
-                          <p style={{ color: '#94a3b8' }}>{task.description}</p>
-                        )}
+              <div className="task-stack">
+                {filteredTasks.map((task) => {
+                  const dueState = getDueState(task.due_date, task.status)
 
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <span>{task.priority}</span>
-                          <span>{task.status}</span>
-                          {task.project_name && <span>{task.project_name}</span>}
-                          {task.due_date && <span>Due {task.due_date}</span>}
+                  return (
+                    <div key={task.id} className={`task-card-premium ${dueState}`}>
+                      <div className="task-card-top">
+                        <div>
+                          <h3 className="task-title">{task.title}</h3>
+                          {task.description && (
+                            <p className="task-desc">{task.description}</p>
+                          )}
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <button onClick={() => toggleDone(task)}>Toggle Done</button>
-                        <button onClick={() => deleteTask(task.id)}>Delete</button>
+                      <div className="task-meta">
+                        <span className={`pill ${task.priority.toLowerCase()}`}>
+                          {task.priority}
+                        </span>
+                        <span className="pill neutral">{task.status}</span>
+                        {task.project_name && (
+                          <span className="pill project">{task.project_name}</span>
+                        )}
+                        {task.due_date && (
+                          <span className={`pill ${dueState === 'overdue' ? 'high' : dueState === 'today' ? 'today' : 'due'}`}>
+                            {dueState === 'overdue'
+                              ? `Overdue • ${formatDate(task.due_date)}`
+                              : dueState === 'today'
+                              ? `Due Today • ${formatDate(task.due_date)}`
+                              : `Due ${formatDate(task.due_date)}`}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="task-actions-premium">
+                        <button
+                          className="action-btn edit-btn"
+                          onClick={() => startEdit(task)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="action-btn toggle-btn"
+                          onClick={() => toggleDone(task)}
+                        >
+                          {task.status === 'DONE' ? 'Mark Active' : 'Mark Done'}
+                        </button>
+                        <button
+                          className="action-btn delete-btn"
+                          onClick={() => deleteTask(task.id)}
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
-          </div>
-        </div>
+          </section>
+        </main>
       </div>
     </div>
   )
