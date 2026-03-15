@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 
+const FREE_TASK_LIMIT = 5
+
 function formatDate(dateString) {
   if (!dateString) return ''
   const date = new Date(dateString + 'T00:00:00')
@@ -25,9 +27,16 @@ function getDueState(dateString, status) {
   return 'upcoming'
 }
 
+function getPriorityIcon(priority) {
+  if (priority === 'HIGH') return '⚠️'
+  if (priority === 'MEDIUM') return '🟡'
+  return '✅'
+}
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -41,6 +50,10 @@ export default function App() {
 
   const [editingTaskId, setEditingTaskId] = useState(null)
   const [toast, setToast] = useState({ show: false, text: '', type: 'info' })
+  const [alerts, setAlerts] = useState([])
+  const [notifPermission, setNotifPermission] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  )
 
   const [form, setForm] = useState({
     title: '',
@@ -59,7 +72,7 @@ export default function App() {
     if (!toast.show) return
     const timer = setTimeout(() => {
       setToast({ show: false, text: '', type: 'info' })
-    }, 2500)
+    }, 2800)
     return () => clearTimeout(timer)
   }, [toast])
 
@@ -83,17 +96,110 @@ export default function App() {
   useEffect(() => {
     if (user) {
       ensureProfile(user)
+      fetchProfile(user.id)
       fetchTasks(user.id)
     } else {
       setTasks([])
+      setProfile(null)
     }
   }, [user])
+
+  useEffect(() => {
+    const importantAlerts = tasks
+      .filter((task) => task.status !== 'DONE')
+      .filter((task) => {
+        const dueState = getDueState(task.due_date, task.status)
+        return task.priority === 'HIGH' || dueState === 'today' || dueState === 'overdue'
+      })
+      .map((task) => {
+        const dueState = getDueState(task.due_date, task.status)
+
+        let message = ''
+        if (dueState === 'overdue') {
+          message = `🚨 "${task.title}" is overdue`
+        } else if (dueState === 'today' && task.priority === 'HIGH') {
+          message = `⚠️ "${task.title}" is due today and high priority`
+        } else if (dueState === 'today') {
+          message = `📅 "${task.title}" is due today`
+        } else if (task.priority === 'HIGH') {
+          message = `🔥 "${task.title}" is high priority`
+        }
+
+        return {
+          id: task.id,
+          message,
+        }
+      })
+
+    setAlerts(importantAlerts)
+  }, [tasks])
+
+  useEffect(() => {
+    if (!session || notifPermission !== 'granted') return
+    if (typeof Notification === 'undefined') return
+
+    const sentKey = 'taskquil_sent_notifications'
+    const sent = JSON.parse(localStorage.getItem(sentKey) || '[]')
+    const freshSent = [...sent]
+
+    tasks.forEach((task) => {
+      if (task.status === 'DONE') return
+
+      const dueState = getDueState(task.due_date, task.status)
+      const isHigh = task.priority === 'HIGH'
+
+      if (!isHigh && dueState !== 'today' && dueState !== 'overdue') return
+
+      const uniqueId = `${task.id}-${task.priority}-${task.status}-${task.due_date || 'none'}`
+
+      if (freshSent.includes(uniqueId)) return
+
+      let title = 'Taskquil Alert'
+      let body = task.title
+
+      if (dueState === 'overdue' && isHigh) {
+        title = '🚨 High Priority Overdue Task'
+        body = `"${task.title}" is overdue and high priority`
+      } else if (dueState === 'overdue') {
+        title = '⏰ Task Overdue'
+        body = `"${task.title}" is overdue`
+      } else if (dueState === 'today' && isHigh) {
+        title = '⚠️ Due Today + High Priority'
+        body = `"${task.title}" is due today and needs attention`
+      } else if (dueState === 'today') {
+        title = '📅 Task Due Today'
+        body = `"${task.title}" is due today`
+      } else if (isHigh) {
+        title = '🔥 High Priority Task'
+        body = `"${task.title}" is marked high priority`
+      }
+
+      new Notification(title, {
+        body,
+        tag: uniqueId,
+      })
+
+      freshSent.push(uniqueId)
+    })
+
+    localStorage.setItem(sentKey, JSON.stringify(freshSent))
+  }, [tasks, session, notifPermission])
 
   async function ensureProfile(currentUser) {
     await supabase.from('profiles').upsert({
       id: currentUser.id,
       email: currentUser.email,
     })
+  }
+
+  async function fetchProfile(userId) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single()
+
+    if (!error) setProfile(data)
   }
 
   async function fetchTasks(userId) {
@@ -146,6 +252,22 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
+  async function enableNotifications() {
+    if (typeof Notification === 'undefined') {
+      showToast('Browser notifications are not supported', 'error')
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    setNotifPermission(permission)
+
+    if (permission === 'granted') {
+      showToast('Browser alerts enabled', 'success')
+    } else {
+      showToast('Notification permission was not allowed', 'error')
+    }
+  }
+
   function resetForm() {
     setForm({
       title: '',
@@ -171,11 +293,20 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  const currentPlan = profile?.plan || 'free'
+  const isPro = currentPlan === 'pro'
+  const taskLimitReached = !isPro && tasks.length >= FREE_TASK_LIMIT
+
   async function saveTask(e) {
     e.preventDefault()
 
     if (!form.title.trim() || !user) {
       showToast('Task title is required', 'error')
+      return
+    }
+
+    if (!editingTaskId && taskLimitReached) {
+      showToast(`Free plan allows only ${FREE_TASK_LIMIT} tasks`, 'error')
       return
     }
 
@@ -294,43 +425,66 @@ export default function App() {
   if (!session) {
     return (
       <div className="cloud-shell">
-        <div className="auth-card">
-          <p className="auth-brand">Taskquil</p>
-          <h1 className="auth-title">
-            {authMode === 'signup' ? 'Create account' : 'Welcome back'}
-          </h1>
-          <p className="auth-subtitle">
-            Organize tasks, track deadlines, and stay focused.
-          </p>
+        {toast.show && <div className={`toast toast-${toast.type}`}>{toast.text}</div>}
 
-          <form onSubmit={handleAuth} className="auth-form">
-            <input
-              className="cloud-input"
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <input
-              className="cloud-input"
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button className="primary-btn big-btn" type="submit">
-              {authMode === 'signup' ? 'Sign Up' : 'Login'}
+        <div className="landing-wrap">
+          <section className="hero-card">
+            <p className="auth-brand">Taskquil</p>
+            <h1 className="hero-title">Plan work clearly. Finish tasks faster.</h1>
+            <p className="hero-subtitle">
+              Taskquil helps you organize tasks, track deadlines, and stay focused.
+            </p>
+
+            <div className="hero-actions">
+              <button className="primary-btn big-btn" onClick={() => setAuthMode('signup')}>
+                Get Started Free
+              </button>
+              <button className="secondary-btn" onClick={() => setAuthMode('login')}>
+                Login
+              </button>
+            </div>
+          </section>
+
+          <section className="auth-card">
+            <p className="auth-brand">Taskquil</p>
+            <h1 className="auth-title">
+              {authMode === 'signup' ? 'Create account' : 'Welcome back'}
+            </h1>
+            <p className="auth-subtitle">
+              {authMode === 'signup'
+                ? 'Start with the free plan in seconds.'
+                : 'Login to access your cloud workspace.'}
+            </p>
+
+            <form onSubmit={handleAuth} className="auth-form">
+              <input
+                className="cloud-input"
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <input
+                className="cloud-input"
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button className="primary-btn big-btn" type="submit">
+                {authMode === 'signup' ? 'Sign Up' : 'Login'}
+              </button>
+            </form>
+
+            <button
+              className="text-btn"
+              onClick={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')}
+            >
+              {authMode === 'signup'
+                ? 'Already have an account? Login'
+                : 'Need an account? Sign up'}
             </button>
-          </form>
-
-          <button
-            className="text-btn"
-            onClick={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')}
-          >
-            {authMode === 'signup'
-              ? 'Already have an account? Login'
-              : 'Need an account? Sign up'}
-          </button>
+          </section>
         </div>
       </div>
     )
@@ -354,12 +508,44 @@ export default function App() {
             <p className="auth-brand">Taskquil</p>
             <h1 className="dashboard-title">Your Cloud Workspace</h1>
             <p className="dashboard-subtitle">{user.email}</p>
+
+            <div className="plan-badge-row">
+              <span className={`plan-badge ${isPro ? 'pro' : 'free'}`}>
+                {isPro ? 'Pro Plan' : 'Free Plan'}
+              </span>
+              {!isPro && (
+                <span className="plan-limit-text">
+                  {tasks.length}/{FREE_TASK_LIMIT} tasks used
+                </span>
+              )}
+            </div>
           </div>
 
-          <button className="secondary-btn" onClick={logout}>
-            Logout
-          </button>
+          <div className="header-actions">
+            {notifPermission !== 'granted' && (
+              <button className="secondary-btn" onClick={enableNotifications}>
+                Enable Alerts
+              </button>
+            )}
+
+            <button className="secondary-btn" onClick={logout}>
+              Logout
+            </button>
+          </div>
         </header>
+
+        {alerts.length > 0 && (
+          <section className="alerts-panel">
+            <h3>Important Alerts</h3>
+            <div className="alerts-list">
+              {alerts.map((alert) => (
+                <div key={alert.id} className="alert-item">
+                  {alert.message}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="stats-row">
           <div className="stat-box">
@@ -379,6 +565,12 @@ export default function App() {
         <main className="cloud-grid">
           <form onSubmit={saveTask} className="panel card-form">
             <h2>{editingTaskId ? 'Edit Task' : 'New Task'}</h2>
+
+            {!editingTaskId && taskLimitReached && (
+              <div className="limit-box">
+                Free plan task limit reached.
+              </div>
+            )}
 
             <input
               className="cloud-input"
@@ -429,7 +621,11 @@ export default function App() {
             />
 
             <div className="form-actions">
-              <button className="primary-btn big-btn" type="submit">
+              <button
+                className="primary-btn big-btn"
+                type="submit"
+                disabled={!editingTaskId && taskLimitReached}
+              >
                 {editingTaskId ? 'Save Changes' : 'Create Task'}
               </button>
 
@@ -493,7 +689,9 @@ export default function App() {
                     <div key={task.id} className={`task-card-premium ${dueState}`}>
                       <div className="task-card-top">
                         <div>
-                          <h3 className="task-title">{task.title}</h3>
+                          <h3 className="task-title">
+                            {getPriorityIcon(task.priority)} {task.title}
+                          </h3>
                           {task.description && (
                             <p className="task-desc">{task.description}</p>
                           )}
@@ -509,7 +707,15 @@ export default function App() {
                           <span className="pill project">{task.project_name}</span>
                         )}
                         {task.due_date && (
-                          <span className={`pill ${dueState === 'overdue' ? 'high' : dueState === 'today' ? 'today' : 'due'}`}>
+                          <span
+                            className={`pill ${
+                              dueState === 'overdue'
+                                ? 'high'
+                                : dueState === 'today'
+                                ? 'today'
+                                : 'due'
+                            }`}
+                          >
                             {dueState === 'overdue'
                               ? `Overdue • ${formatDate(task.due_date)}`
                               : dueState === 'today'
@@ -521,18 +727,21 @@ export default function App() {
 
                       <div className="task-actions-premium">
                         <button
+                          type="button"
                           className="action-btn edit-btn"
                           onClick={() => startEdit(task)}
                         >
                           Edit
                         </button>
                         <button
+                          type="button"
                           className="action-btn toggle-btn"
                           onClick={() => toggleDone(task)}
                         >
                           {task.status === 'DONE' ? 'Mark Active' : 'Mark Done'}
                         </button>
                         <button
+                          type="button"
                           className="action-btn delete-btn"
                           onClick={() => deleteTask(task.id)}
                         >
