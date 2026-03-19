@@ -161,7 +161,12 @@ export default function App() {
       .filter((task) => {
         const dueState = getDueState(task.due_date, task.status)
         const tomorrow = isDueTomorrow(task.due_date, task.status)
-        return task.priority === 'HIGH' || dueState === 'today' || dueState === 'overdue' || tomorrow
+        return (
+          task.priority === 'HIGH' ||
+          dueState === 'today' ||
+          dueState === 'overdue' ||
+          tomorrow
+        )
       })
       .map((task) => {
         const dueState = getDueState(task.due_date, task.status)
@@ -249,6 +254,7 @@ export default function App() {
     await supabase.from('profiles').upsert({
       id: currentUser.id,
       email: currentUser.email,
+      tasks_created_count: 0,
     })
   }
 
@@ -375,7 +381,8 @@ export default function App() {
 
   const currentPlan = profile?.plan || 'free'
   const isPro = currentPlan === 'pro'
-  const taskLimitReached = !isPro && tasks.length >= FREE_TASK_LIMIT
+  const tasksUsed = profile?.tasks_created_count || 0
+  const taskLimitReached = !isPro && tasksUsed >= FREE_TASK_LIMIT
 
   async function saveTask(e) {
     e.preventDefault()
@@ -432,8 +439,23 @@ export default function App() {
       return
     }
 
+    const newCount = (profile?.tasks_created_count || 0) + 1
+
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        tasks_created_count: newCount,
+      })
+      .eq('id', user.id)
+
+    if (profileError) {
+      showToast(profileError.message, 'error')
+      return
+    }
+
     showToast('Task created', 'success')
     resetForm()
+    fetchProfile(user.id)
     fetchTasks(user.id)
   }
 
@@ -589,11 +611,7 @@ export default function App() {
       <div className="bg-orb orb-b" />
       <div className="bg-orb orb-c" />
 
-      {toast.show && (
-        <div className={`toast toast-${toast.type}`}>
-          {toast.text}
-        </div>
-      )}
+      {toast.show && <div className={`toast toast-${toast.type}`}>{toast.text}</div>}
 
       <div className="cloud-container">
         <header className="cloud-header">
@@ -608,7 +626,7 @@ export default function App() {
               </span>
               {!isPro && (
                 <span className="plan-limit-text">
-                  {tasks.length}/{FREE_TASK_LIMIT} tasks used
+                  {tasksUsed}/{FREE_TASK_LIMIT} tasks used
                 </span>
               )}
             </div>
@@ -660,9 +678,7 @@ export default function App() {
             <h2>{editingTaskId ? 'Edit Task' : 'New Task'}</h2>
 
             {!editingTaskId && taskLimitReached && (
-              <div className="limit-box">
-                Free plan task limit reached.
-              </div>
+              <div className="limit-box">Free plan task limit reached.</div>
             )}
 
             <input
@@ -793,9 +809,7 @@ export default function App() {
                           <h3 className="task-title">
                             {getPriorityIcon(task.priority)} {task.title}
                           </h3>
-                          {task.description && (
-                            <p className="task-desc">{task.description}</p>
-                          )}
+                          {task.description && <p className="task-desc">{task.description}</p>}
                         </div>
                       </div>
 
