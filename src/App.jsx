@@ -251,11 +251,15 @@ export default function App() {
   }, [tasks, session, notifPermission, audioReady])
 
   async function ensureProfile(currentUser) {
-    await supabase.from('profiles').upsert({
-      id: currentUser.id,
-      email: currentUser.email,
-      tasks_created_count: 0,
-    })
+    await supabase.from('profiles').upsert(
+      {
+        id: currentUser.id,
+        email: currentUser.email,
+      },
+      {
+        onConflict: 'id',
+      }
+    )
   }
 
   async function fetchProfile(userId) {
@@ -439,12 +443,12 @@ export default function App() {
       return
     }
 
-    const newCount = (profile?.tasks_created_count || 0) + 1
+    const currentCount = profile?.tasks_created_count || 0
 
     const { error: profileError } = await supabase
       .from('profiles')
       .update({
-        tasks_created_count: newCount,
+        tasks_created_count: currentCount + 1,
       })
       .eq('id', user.id)
 
@@ -455,8 +459,8 @@ export default function App() {
 
     showToast('Task created', 'success')
     resetForm()
-    fetchProfile(user.id)
-    fetchTasks(user.id)
+    await fetchProfile(user.id)
+    await fetchTasks(user.id)
   }
 
   async function deleteTask(id) {
@@ -809,7 +813,9 @@ export default function App() {
                           <h3 className="task-title">
                             {getPriorityIcon(task.priority)} {task.title}
                           </h3>
-                          {task.description && <p className="task-desc">{task.description}</p>}
+                          {task.description && (
+                            <p className="task-desc">{task.description}</p>
+                          )}
                         </div>
                       </div>
 
