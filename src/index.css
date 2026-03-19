@@ -455,6 +455,11 @@ textarea {
   text-align: center;
 }
 
+.empty-icon {
+  font-size: 2rem;
+  margin-bottom: 8px;
+}
+
 .toast {
   position: fixed;
   top: 20px;

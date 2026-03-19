@@ -28,9 +28,25 @@ function getDueState(dateString, status) {
 }
 
 function getPriorityIcon(priority) {
-  if (priority === 'HIGH') return '⚠️'
+  if (priority === 'HIGH') return '🔥'
   if (priority === 'MEDIUM') return '🟡'
   return '✅'
+}
+
+function validatePassword(password) {
+  const minLength = password.length >= 8
+  const hasUpper = /[A-Z]/.test(password)
+  const hasLower = /[a-z]/.test(password)
+  const hasNumber = /[0-9]/.test(password)
+  const hasSpecial = /[^A-Za-z0-9]/.test(password)
+
+  if (!minLength) return 'Password must be at least 8 characters'
+  if (!hasUpper) return 'Password must include at least 1 uppercase letter'
+  if (!hasLower) return 'Password must include at least 1 lowercase letter'
+  if (!hasNumber) return 'Password must include at least 1 number'
+  if (!hasSpecial) return 'Password must include at least 1 special character'
+
+  return ''
 }
 
 export default function App() {
@@ -54,6 +70,7 @@ export default function App() {
   const [notifPermission, setNotifPermission] = useState(
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   )
+  const [audioReady, setAudioReady] = useState(false)
 
   const [form, setForm] = useState({
     title: '',
@@ -68,11 +85,18 @@ export default function App() {
     setToast({ show: true, text, type })
   }
 
+  function playAlertSound() {
+    if (!audioReady) return
+    const audio = new Audio('/alert.mp3')
+    audio.volume = 1
+    audio.play().catch(() => {})
+  }
+
   useEffect(() => {
     if (!toast.show) return
     const timer = setTimeout(() => {
       setToast({ show: false, text: '', type: 'info' })
-    }, 2800)
+    }, 3000)
     return () => clearTimeout(timer)
   }, [toast])
 
@@ -179,11 +203,12 @@ export default function App() {
         tag: uniqueId,
       })
 
+      playAlertSound()
       freshSent.push(uniqueId)
     })
 
     localStorage.setItem(sentKey, JSON.stringify(freshSent))
-  }, [tasks, session, notifPermission])
+  }, [tasks, session, notifPermission, audioReady])
 
   async function ensureProfile(currentUser) {
     await supabase.from('profiles').upsert({
@@ -226,6 +251,13 @@ export default function App() {
     }
 
     if (authMode === 'signup') {
+      const passwordError = validatePassword(password)
+
+      if (passwordError) {
+        showToast(passwordError, 'error')
+        return
+      }
+
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -260,6 +292,17 @@ export default function App() {
 
     const permission = await Notification.requestPermission()
     setNotifPermission(permission)
+
+    try {
+      const unlockAudio = new Audio('/alert.mp3')
+      unlockAudio.volume = 0
+      await unlockAudio.play()
+      unlockAudio.pause()
+      unlockAudio.currentTime = 0
+      setAudioReady(true)
+    } catch {
+      setAudioReady(false)
+    }
 
     if (permission === 'granted') {
       showToast('Browser alerts enabled', 'success')
@@ -419,12 +462,23 @@ export default function App() {
   }, [tasks])
 
   if (loading) {
-    return <div className="cloud-shell"><div className="auth-card">Loading...</div></div>
+    return (
+      <div className="cloud-shell">
+        <div className="bg-orb orb-a" />
+        <div className="bg-orb orb-b" />
+        <div className="bg-orb orb-c" />
+        <div className="auth-card">Loading...</div>
+      </div>
+    )
   }
 
   if (!session) {
     return (
       <div className="cloud-shell">
+        <div className="bg-orb orb-a" />
+        <div className="bg-orb orb-b" />
+        <div className="bg-orb orb-c" />
+
         {toast.show && <div className={`toast toast-${toast.type}`}>{toast.text}</div>}
 
         <div className="landing-wrap">
@@ -712,15 +766,15 @@ export default function App() {
                               dueState === 'overdue'
                                 ? 'high'
                                 : dueState === 'today'
-                                ? 'today'
-                                : 'due'
+                                  ? 'today'
+                                  : 'due'
                             }`}
                           >
                             {dueState === 'overdue'
                               ? `Overdue • ${formatDate(task.due_date)}`
                               : dueState === 'today'
-                              ? `Due Today • ${formatDate(task.due_date)}`
-                              : `Due ${formatDate(task.due_date)}`}
+                                ? `Due Today • ${formatDate(task.due_date)}`
+                                : `Due ${formatDate(task.due_date)}`}
                           </span>
                         )}
                       </div>
