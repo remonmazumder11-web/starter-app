@@ -13,6 +13,17 @@ function formatDate(dateString) {
   })
 }
 
+function formatTime(timeString) {
+  if (!timeString) return ''
+  const [hour, minute] = timeString.split(':')
+  const date = new Date()
+  date.setHours(Number(hour), Number(minute), 0, 0)
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 function getDueState(dateString, status) {
   if (!dateString || status === 'DONE') return 'normal'
 
@@ -25,6 +36,21 @@ function getDueState(dateString, status) {
   if (due.getTime() === today.getTime()) return 'today'
   if (due < today) return 'overdue'
   return 'upcoming'
+}
+
+function isDueTomorrow(dateString, status) {
+  if (!dateString || status === 'DONE') return false
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
+
+  const due = new Date(dateString + 'T00:00:00')
+  due.setHours(0, 0, 0, 0)
+
+  return due.getTime() === tomorrow.getTime()
 }
 
 function getPriorityIcon(priority) {
@@ -76,6 +102,7 @@ export default function App() {
     title: '',
     description: '',
     dueDate: '',
+    dueTime: '',
     priority: 'MEDIUM',
     status: 'TODO',
     projectName: '',
@@ -133,18 +160,22 @@ export default function App() {
       .filter((task) => task.status !== 'DONE')
       .filter((task) => {
         const dueState = getDueState(task.due_date, task.status)
-        return task.priority === 'HIGH' || dueState === 'today' || dueState === 'overdue'
+        const tomorrow = isDueTomorrow(task.due_date, task.status)
+        return task.priority === 'HIGH' || dueState === 'today' || dueState === 'overdue' || tomorrow
       })
       .map((task) => {
         const dueState = getDueState(task.due_date, task.status)
+        const tomorrow = isDueTomorrow(task.due_date, task.status)
 
         let message = ''
         if (dueState === 'overdue') {
           message = `🚨 "${task.title}" is overdue`
         } else if (dueState === 'today' && task.priority === 'HIGH') {
-          message = `⚠️ "${task.title}" is due today and high priority`
+          message = `⚠️ "${task.title}" is due today${task.due_time ? ` at ${formatTime(task.due_time)}` : ''} and high priority`
         } else if (dueState === 'today') {
-          message = `📅 "${task.title}" is due today`
+          message = `📅 "${task.title}" is due today${task.due_time ? ` at ${formatTime(task.due_time)}` : ''}`
+        } else if (tomorrow) {
+          message = `⏳ "${task.title}" is due tomorrow${task.due_time ? ` at ${formatTime(task.due_time)}` : ''}. Finish it soon.`
         } else if (task.priority === 'HIGH') {
           message = `🔥 "${task.title}" is high priority`
         }
@@ -170,11 +201,12 @@ export default function App() {
       if (task.status === 'DONE') return
 
       const dueState = getDueState(task.due_date, task.status)
+      const tomorrow = isDueTomorrow(task.due_date, task.status)
       const isHigh = task.priority === 'HIGH'
 
-      if (!isHigh && dueState !== 'today' && dueState !== 'overdue') return
+      if (!isHigh && dueState !== 'today' && dueState !== 'overdue' && !tomorrow) return
 
-      const uniqueId = `${task.id}-${task.priority}-${task.status}-${task.due_date || 'none'}`
+      const uniqueId = `${task.id}-${task.priority}-${task.status}-${task.due_date || 'none'}-${tomorrow ? 'tomorrow' : dueState}`
 
       if (freshSent.includes(uniqueId)) return
 
@@ -189,10 +221,13 @@ export default function App() {
         body = `"${task.title}" is overdue`
       } else if (dueState === 'today' && isHigh) {
         title = '⚠️ Due Today + High Priority'
-        body = `"${task.title}" is due today and needs attention`
+        body = `"${task.title}" is due today${task.due_time ? ` at ${formatTime(task.due_time)}` : ''} and needs attention`
       } else if (dueState === 'today') {
         title = '📅 Task Due Today'
-        body = `"${task.title}" is due today`
+        body = `"${task.title}" is due today${task.due_time ? ` at ${formatTime(task.due_time)}` : ''}`
+      } else if (tomorrow) {
+        title = '⏳ Task Due Tomorrow'
+        body = `"${task.title}" is due tomorrow${task.due_time ? ` at ${formatTime(task.due_time)}` : ''}. Finish it soon`
       } else if (isHigh) {
         title = '🔥 High Priority Task'
         body = `"${task.title}" is marked high priority`
@@ -316,6 +351,7 @@ export default function App() {
       title: '',
       description: '',
       dueDate: '',
+      dueTime: '',
       priority: 'MEDIUM',
       status: 'TODO',
       projectName: '',
@@ -329,6 +365,7 @@ export default function App() {
       title: task.title || '',
       description: task.description || '',
       dueDate: task.due_date || '',
+      dueTime: task.due_time || '',
       priority: task.priority || 'MEDIUM',
       status: task.status || 'TODO',
       projectName: task.project_name || '',
@@ -360,6 +397,7 @@ export default function App() {
           title: form.title.trim(),
           description: form.description.trim(),
           due_date: form.dueDate || null,
+          due_time: form.dueTime || null,
           priority: form.priority,
           status: form.status,
           project_name: form.projectName.trim(),
@@ -383,6 +421,7 @@ export default function App() {
       title: form.title.trim(),
       description: form.description.trim(),
       due_date: form.dueDate || null,
+      due_time: form.dueTime || null,
       priority: form.priority,
       status: form.status,
       project_name: form.projectName.trim(),
@@ -647,6 +686,13 @@ export default function App() {
               onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
             />
 
+            <input
+              className="cloud-input"
+              type="time"
+              value={form.dueTime}
+              onChange={(e) => setForm({ ...form, dueTime: e.target.value })}
+            />
+
             <select
               className="cloud-input"
               value={form.priority}
@@ -738,6 +784,7 @@ export default function App() {
               <div className="task-stack">
                 {filteredTasks.map((task) => {
                   const dueState = getDueState(task.due_date, task.status)
+                  const tomorrow = isDueTomorrow(task.due_date, task.status)
 
                   return (
                     <div key={task.id} className={`task-card-premium ${dueState}`}>
@@ -767,14 +814,18 @@ export default function App() {
                                 ? 'high'
                                 : dueState === 'today'
                                   ? 'today'
-                                  : 'due'
+                                  : tomorrow
+                                    ? 'today'
+                                    : 'due'
                             }`}
                           >
                             {dueState === 'overdue'
-                              ? `Overdue • ${formatDate(task.due_date)}`
+                              ? `Overdue • ${formatDate(task.due_date)}${task.due_time ? ` • ${formatTime(task.due_time)}` : ''}`
                               : dueState === 'today'
-                                ? `Due Today • ${formatDate(task.due_date)}`
-                                : `Due ${formatDate(task.due_date)}`}
+                                ? `Due Today • ${formatDate(task.due_date)}${task.due_time ? ` • ${formatTime(task.due_time)}` : ''}`
+                                : tomorrow
+                                  ? `Due Tomorrow • ${formatDate(task.due_date)}${task.due_time ? ` • ${formatTime(task.due_time)}` : ''}`
+                                  : `Due ${formatDate(task.due_date)}${task.due_time ? ` • ${formatTime(task.due_time)}` : ''}`}
                           </span>
                         )}
                       </div>
