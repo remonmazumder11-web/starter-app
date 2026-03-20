@@ -36,17 +36,36 @@ function formatTime(timeString) {
   })
 }
 
-function getDueState(dateString, status) {
+function getTaskDueDateTime(dateString, timeString) {
+  if (!dateString) return null
+
+  const safeTime = timeString || '23:59'
+  const [hour, minute] = safeTime.split(':')
+  const due = new Date(dateString + 'T00:00:00')
+  due.setHours(Number(hour || 0), Number(minute || 0), 0, 0)
+  return due
+}
+
+function getDueState(dateString, status, timeString) {
   if (!dateString || status === 'DONE') return 'normal'
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const now = new Date()
 
-  const due = new Date(dateString + 'T00:00:00')
-  due.setHours(0, 0, 0, 0)
+  const todayStart = new Date(now)
+  todayStart.setHours(0, 0, 0, 0)
 
-  if (due.getTime() === today.getTime()) return 'today'
-  if (due < today) return 'overdue'
+  const dueDay = new Date(dateString + 'T00:00:00')
+  dueDay.setHours(0, 0, 0, 0)
+
+  const dueDateTime = getTaskDueDateTime(dateString, timeString)
+
+  if (dueDay.getTime() < todayStart.getTime()) return 'overdue'
+
+  if (dueDay.getTime() === todayStart.getTime()) {
+    if (dueDateTime && dueDateTime.getTime() <= now.getTime()) return 'overdue'
+    return 'today'
+  }
+
   return 'upcoming'
 }
 
@@ -104,6 +123,7 @@ export default function App() {
   const [profile, setProfile] = useState(null)
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
+  const [, setNowTick] = useState(Date.now())
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -185,6 +205,14 @@ export default function App() {
   }, [toast])
 
   useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTick(Date.now())
+    }, 30000)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
     const currentPath = window.location.pathname
     if (currentPath === '/reset-password') {
       setRecoveryMode(true)
@@ -231,7 +259,7 @@ export default function App() {
     const importantAlerts = tasks
       .filter((task) => task.status !== 'DONE')
       .filter((task) => {
-        const dueState = getDueState(task.due_date, task.status)
+        const dueState = getDueState(task.due_date, task.status, task.due_time)
         const tomorrow = isDueTomorrow(task.due_date, task.status)
         return (
           task.priority === 'HIGH' ||
@@ -241,12 +269,12 @@ export default function App() {
         )
       })
       .map((task) => {
-        const dueState = getDueState(task.due_date, task.status)
+        const dueState = getDueState(task.due_date, task.status, task.due_time)
         const tomorrow = isDueTomorrow(task.due_date, task.status)
 
         let message = ''
         if (dueState === 'overdue') {
-          message = `🚨 "${task.title}" is overdue`
+          message = `🚨 "${task.title}" was due${task.due_date ? ` on ${formatDate(task.due_date)}` : ''}${task.due_time ? ` at ${formatTime(task.due_time)}` : ''}`
         } else if (dueState === 'today' && task.priority === 'HIGH') {
           message = `⚠️ "${task.title}" is due today${task.due_time ? ` at ${formatTime(task.due_time)}` : ''} and high priority`
         } else if (dueState === 'today') {
@@ -277,13 +305,15 @@ export default function App() {
     tasks.forEach((task) => {
       if (task.status === 'DONE') return
 
-      const dueState = getDueState(task.due_date, task.status)
+      const dueState = getDueState(task.due_date, task.status, task.due_time)
       const tomorrow = isDueTomorrow(task.due_date, task.status)
       const isHigh = task.priority === 'HIGH'
 
       if (!isHigh && dueState !== 'today' && dueState !== 'overdue' && !tomorrow) return
 
-      const uniqueId = `${task.id}-${task.priority}-${task.status}-${task.due_date || 'none'}-${tomorrow ? 'tomorrow' : dueState}`
+      const dueDateTime = getTaskDueDateTime(task.due_date, task.due_time)
+      const overdueMomentKey = dueDateTime ? dueDateTime.toISOString() : task.due_date || 'none'
+      const uniqueId = `${task.id}-${task.priority}-${task.status}-${overdueMomentKey}-${tomorrow ? 'tomorrow' : dueState}`
 
       if (freshSent.includes(uniqueId)) return
 
@@ -291,11 +321,11 @@ export default function App() {
       let body = task.title
 
       if (dueState === 'overdue' && isHigh) {
-        title = '🚨 High Priority Overdue Task'
-        body = `"${task.title}" is overdue and high priority`
+        title = '🚨 High Priority Task Is Overdue'
+        body = `"${task.title}" was due${task.due_time ? ` at ${formatTime(task.due_time)}` : ''} and is now overdue`
       } else if (dueState === 'overdue') {
-        title = '⏰ Task Overdue'
-        body = `"${task.title}" is overdue`
+        title = '⏰ Task Time Is Over'
+        body = `"${task.title}" was due${task.due_time ? ` at ${formatTime(task.due_time)}` : ''} and is now overdue`
       } else if (dueState === 'today' && isHigh) {
         title = '⚠️ Due Today + High Priority'
         body = `"${task.title}" is due today${task.due_time ? ` at ${formatTime(task.due_time)}` : ''} and needs attention`
@@ -1124,7 +1154,7 @@ export default function App() {
             ) : (
               <div className="task-stack">
                 {filteredTasks.map((task) => {
-                  const dueState = getDueState(task.due_date, task.status)
+                  const dueState = getDueState(task.due_date, task.status, task.due_time)
                   const tomorrow = isDueTomorrow(task.due_date, task.status)
 
                   return (
