@@ -112,6 +112,14 @@ function getBaseUrl() {
   return 'https://taskquil.vercel.app'
 }
 
+function isImageType(type) {
+  return type?.startsWith('image/')
+}
+
+function isVideoType(type) {
+  return type?.startsWith('video/')
+}
+
 export default function App() {
   const BASE_URL = getBaseUrl()
   const AUTH_REDIRECT_URL = `${BASE_URL}/auth`
@@ -147,10 +155,11 @@ export default function App() {
   const [confirmPassword, setConfirmPassword] = useState('')
 
   const [promoCodeInput, setPromoCodeInput] = useState('')
-  const [mediaFile, setMediaFile] = useState(null)
-  const [mediaPreview, setMediaPreview] = useState('')
-  const [mediaPreviewType, setMediaPreviewType] = useState('')
-  const [uploadingMedia, setUploadingMedia] = useState(false)
+  const [attachmentFile, setAttachmentFile] = useState(null)
+  const [attachmentPreview, setAttachmentPreview] = useState('')
+  const [attachmentPreviewType, setAttachmentPreviewType] = useState('')
+  const [attachmentPreviewName, setAttachmentPreviewName] = useState('')
+  const [uploadingAttachment, setUploadingAttachment] = useState(false)
 
   const [form, setForm] = useState({
     title: '',
@@ -173,62 +182,64 @@ export default function App() {
     audio.play().catch(() => {})
   }
 
-  function clearMediaSelection() {
-    setMediaFile(null)
-    setMediaPreview('')
-    setMediaPreviewType('')
+  function clearAttachmentSelection() {
+    if (attachmentPreview && attachmentPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(attachmentPreview)
+    }
+    setAttachmentFile(null)
+    setAttachmentPreview('')
+    setAttachmentPreviewType('')
+    setAttachmentPreviewName('')
   }
 
-  function handleMediaChange(e) {
+  function handleAttachmentChange(e) {
     const file = e.target.files?.[0]
     if (!file) {
-      clearMediaSelection()
+      clearAttachmentSelection()
       return
     }
 
-    const isImage = file.type.startsWith('image/')
-    const isVideo = file.type.startsWith('video/')
-
-    if (!isImage && !isVideo) {
-      showToast('Only image or video files are allowed', 'error')
-      e.target.value = ''
-      return
-    }
-
-    setMediaFile(file)
-    setMediaPreview(URL.createObjectURL(file))
-    setMediaPreviewType(isImage ? 'image' : 'video')
+    const objectUrl = URL.createObjectURL(file)
+    setAttachmentFile(file)
+    setAttachmentPreview(objectUrl)
+    setAttachmentPreviewType(file.type || 'application/octet-stream')
+    setAttachmentPreviewName(file.name)
   }
 
-  async function uploadTaskMedia() {
-    if (!mediaFile || !user) return { media_url: null, media_type: null }
+  async function uploadTaskAttachment() {
+    if (!attachmentFile || !user) {
+      return {
+        media_url: null,
+        media_type: null,
+        media_name: null,
+      }
+    }
 
-    const isImage = mediaFile.type.startsWith('image/')
-    const isVideo = mediaFile.type.startsWith('video/')
-    const extension = mediaFile.name.split('.').pop() || 'file'
+    const extension = attachmentFile.name.split('.').pop() || 'file'
     const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`
 
-    setUploadingMedia(true)
+    setUploadingAttachment(true)
 
     const { error: uploadError } = await supabase.storage
       .from('task-media')
-      .upload(fileName, mediaFile, {
+      .upload(fileName, attachmentFile, {
         cacheControl: '3600',
         upsert: false,
       })
 
     if (uploadError) {
-      setUploadingMedia(false)
+      setUploadingAttachment(false)
       throw new Error(uploadError.message)
     }
 
     const { data } = supabase.storage.from('task-media').getPublicUrl(fileName)
 
-    setUploadingMedia(false)
+    setUploadingAttachment(false)
 
     return {
       media_url: data.publicUrl,
-      media_type: isImage ? 'image' : isVideo ? 'video' : null,
+      media_type: attachmentFile.type || 'application/octet-stream',
+      media_name: attachmentFile.name,
     }
   }
 
@@ -260,9 +271,11 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (mediaPreview) URL.revokeObjectURL(mediaPreview)
+      if (attachmentPreview && attachmentPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(attachmentPreview)
+      }
     }
-  }, [mediaPreview])
+  }, [attachmentPreview])
 
   useEffect(() => {
     if (!toast.show) return
@@ -677,7 +690,7 @@ export default function App() {
       projectName: '',
     })
     setEditingTaskId(null)
-    clearMediaSelection()
+    clearAttachmentSelection()
   }
 
   function startEdit(task) {
@@ -691,9 +704,10 @@ export default function App() {
       status: task.status || 'TODO',
       projectName: task.project_name || '',
     })
-    setMediaFile(null)
-    setMediaPreview(task.media_url || '')
-    setMediaPreviewType(task.media_type || '')
+    setAttachmentFile(null)
+    setAttachmentPreview(task.media_url || '')
+    setAttachmentPreviewType(task.media_type || '')
+    setAttachmentPreviewName(task.media_name || '')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -717,10 +731,10 @@ export default function App() {
     }
 
     try {
-      let uploadedMedia = { media_url: null, media_type: null }
+      let uploadedAttachment = { media_url: null, media_type: null, media_name: null }
 
-      if (mediaFile) {
-        uploadedMedia = await uploadTaskMedia()
+      if (attachmentFile) {
+        uploadedAttachment = await uploadTaskAttachment()
       }
 
       if (editingTaskId) {
@@ -736,8 +750,9 @@ export default function App() {
             priority: form.priority,
             status: form.status,
             project_name: form.projectName.trim(),
-            media_url: uploadedMedia.media_url || currentTask?.media_url || null,
-            media_type: uploadedMedia.media_type || currentTask?.media_type || null,
+            media_url: uploadedAttachment.media_url || currentTask?.media_url || null,
+            media_type: uploadedAttachment.media_type || currentTask?.media_type || null,
+            media_name: uploadedAttachment.media_name || currentTask?.media_name || null,
             updated_at: new Date().toISOString(),
           })
           .eq('id', editingTaskId)
@@ -767,8 +782,9 @@ export default function App() {
         priority: form.priority,
         status: form.status,
         project_name: form.projectName.trim(),
-        media_url: uploadedMedia.media_url,
-        media_type: uploadedMedia.media_type,
+        media_url: uploadedAttachment.media_url,
+        media_type: uploadedAttachment.media_type,
+        media_name: uploadedAttachment.media_name,
       })
 
       if (error) {
@@ -795,8 +811,8 @@ export default function App() {
       await fetchProfile(user.id)
       await fetchTasks(user.id)
     } catch (err) {
-      showToast(err.message || 'Media upload failed', 'error')
-      setUploadingMedia(false)
+      showToast(err.message || 'File upload failed', 'error')
+      setUploadingAttachment(false)
     }
   }
 
@@ -847,7 +863,8 @@ export default function App() {
         !q ||
         task.title.toLowerCase().includes(q) ||
         (task.description || '').toLowerCase().includes(q) ||
-        (task.project_name || '').toLowerCase().includes(q)
+        (task.project_name || '').toLowerCase().includes(q) ||
+        (task.media_name || '').toLowerCase().includes(q)
 
       const matchesStatus = statusFilter === 'ALL' || task.status === statusFilter
       const matchesPriority = priorityFilter === 'ALL' || task.priority === priorityFilter
@@ -1181,32 +1198,35 @@ export default function App() {
             <input
               className="cloud-input"
               type="file"
-              accept="image/*,video/*"
-              onChange={handleMediaChange}
+              onChange={handleAttachmentChange}
             />
 
-            {(mediaPreview || mediaPreviewType) && (
+            {(attachmentPreview || attachmentPreviewName) && (
               <div className="task-media-preview-box">
-                {mediaPreviewType === 'image' ? (
+                {isImageType(attachmentPreviewType) ? (
                   <img
-                    src={mediaPreview}
-                    alt="Task preview"
+                    src={attachmentPreview}
+                    alt={attachmentPreviewName || 'Task attachment'}
                     className="task-media-preview"
                   />
-                ) : mediaPreviewType === 'video' ? (
+                ) : isVideoType(attachmentPreviewType) ? (
                   <video
-                    src={mediaPreview}
+                    src={attachmentPreview}
                     controls
                     className="task-media-preview"
                   />
-                ) : null}
+                ) : (
+                  <div className="cloud-input" style={{ display: 'flex', alignItems: 'center' }}>
+                    Selected file: <strong style={{ marginLeft: 8 }}>{attachmentPreviewName}</strong>
+                  </div>
+                )}
 
                 <button
                   className="secondary-btn"
                   type="button"
-                  onClick={clearMediaSelection}
+                  onClick={clearAttachmentSelection}
                 >
-                  Remove Media
+                  Remove File
                 </button>
               </div>
             )}
@@ -1215,9 +1235,9 @@ export default function App() {
               <button
                 className="primary-btn big-btn"
                 type="submit"
-                disabled={uploadingMedia || (!editingTaskId && taskLimitReached)}
+                disabled={uploadingAttachment || (!editingTaskId && taskLimitReached)}
               >
-                {uploadingMedia
+                {uploadingAttachment
                   ? 'Uploading...'
                   : editingTaskId
                     ? 'Save Changes'
@@ -1325,23 +1345,37 @@ export default function App() {
                         )}
                       </div>
 
-                      {task.media_url && task.media_type === 'image' && (
+                      {task.media_url && isImageType(task.media_type) && (
                         <div className="task-media-box">
                           <img
                             src={task.media_url}
-                            alt={task.title}
+                            alt={task.media_name || task.title}
                             className="task-media-preview"
                           />
                         </div>
                       )}
 
-                      {task.media_url && task.media_type === 'video' && (
+                      {task.media_url && isVideoType(task.media_type) && (
                         <div className="task-media-box">
                           <video
                             src={task.media_url}
                             controls
                             className="task-media-preview"
                           />
+                        </div>
+                      )}
+
+                      {task.media_url && !isImageType(task.media_type) && !isVideoType(task.media_type) && (
+                        <div className="task-media-box">
+                          <a
+                            href={task.media_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="secondary-btn"
+                            style={{ textDecoration: 'none', display: 'inline-block' }}
+                          >
+                            Open File: {task.media_name || 'Attachment'}
+                          </a>
                         </div>
                       )}
 
