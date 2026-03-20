@@ -2,14 +2,23 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 
 const FREE_TASK_LIMIT = 5
-const APP_URL = 'https://taskquil.vercel.app'
-const AUTH_REDIRECT_URL = `${APP_URL}/auth`
-const RESET_REDIRECT_URL = `${APP_URL}/reset-password`
+const PROMO_CODE = 'newbie01'
 
 function formatDate(dateString) {
   if (!dateString) return ''
   const date = new Date(dateString + 'T00:00:00')
   return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function formatDateTime(dateString) {
+  if (!dateString) return ''
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString(undefined, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -78,7 +87,18 @@ function validatePassword(password) {
   return ''
 }
 
+function getBaseUrl() {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin
+  }
+  return 'https://taskquil.vercel.app'
+}
+
 export default function App() {
+  const BASE_URL = getBaseUrl()
+  const AUTH_REDIRECT_URL = `${BASE_URL}/auth`
+  const RESET_REDIRECT_URL = `${BASE_URL}/reset-password`
+
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -107,6 +127,8 @@ export default function App() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
+  const [promoCodeInput, setPromoCodeInput] = useState('')
+
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -126,6 +148,32 @@ export default function App() {
     const audio = new Audio('/alert.mp3')
     audio.volume = 1
     audio.play().catch(() => {})
+  }
+
+  async function checkAndFixPlan(userId, currentProfile) {
+    if (!currentProfile?.plan_expires_at) return currentProfile
+
+    const now = new Date()
+    const expiresAt = new Date(currentProfile.plan_expires_at)
+
+    if (expiresAt.getTime() > now.getTime()) return currentProfile
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({
+        plan: 'free',
+        plan_expires_at: null,
+      })
+      .eq('id', userId)
+      .select('*')
+      .single()
+
+    if (!error) {
+      setProfile(data)
+      return data
+    }
+
+    return currentProfile
   }
 
   useEffect(() => {
@@ -293,7 +341,10 @@ export default function App() {
       .eq('id', userId)
       .single()
 
-    if (!error) setProfile(data)
+    if (!error && data) {
+      const updatedProfile = await checkAndFixPlan(userId, data)
+      setProfile(updatedProfile)
+    }
   }
 
   async function fetchTasks(userId) {
@@ -433,6 +484,59 @@ export default function App() {
     window.history.replaceState({}, '', '/')
   }
 
+  async function redeemPromoCode(e) {
+    e.preventDefault()
+
+    if (!user || !profile) {
+      showToast('Please log in first', 'error')
+      return
+    }
+
+    if (!promoCodeInput.trim()) {
+      showToast('Enter a promo code', 'error')
+      return
+    }
+
+    if (promoCodeInput.trim().toLowerCase() !== PROMO_CODE) {
+      showToast('Invalid promo code', 'error')
+      return
+    }
+
+    if (profile.promo_code_used?.toLowerCase() === PROMO_CODE) {
+      showToast('This account already used that promo code', 'error')
+      return
+    }
+
+    const now = new Date()
+    const currentExpiry =
+      profile.plan_expires_at && new Date(profile.plan_expires_at) > now
+        ? new Date(profile.plan_expires_at)
+        : now
+
+    const newExpiry = new Date(currentExpiry)
+    newExpiry.setMonth(newExpiry.getMonth() + 1)
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({
+        plan: 'pro',
+        plan_expires_at: newExpiry.toISOString(),
+        promo_code_used: PROMO_CODE,
+      })
+      .eq('id', user.id)
+      .select('*')
+      .single()
+
+    if (error) {
+      showToast(error.message, 'error')
+      return
+    }
+
+    setProfile(data)
+    setPromoCodeInput('')
+    showToast('Promo code applied. Pro plan unlocked for 1 month.', 'success')
+  }
+
   async function logout() {
     await supabase.auth.signOut()
   }
@@ -491,7 +595,13 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const currentPlan = profile?.plan || 'free'
+  const now = new Date()
+  const proStillActive =
+    profile?.plan === 'pro' &&
+    profile?.plan_expires_at &&
+    new Date(profile.plan_expires_at) > now
+
+  const currentPlan = proStillActive ? 'pro' : 'free'
   const isPro = currentPlan === 'pro'
   const tasksUsed = profile?.tasks_created_count || 0
   const taskLimitReached = !isPro && tasksUsed >= FREE_TASK_LIMIT
@@ -817,6 +927,12 @@ export default function App() {
                 </span>
               )}
             </div>
+
+            {isPro && profile?.plan_expires_at && (
+              <p className="dashboard-subtitle">
+                Pro active until {formatDateTime(profile.plan_expires_at)}
+              </p>
+            )}
           </div>
 
           <div className="header-actions">
@@ -831,6 +947,28 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        <section className="panel" style={{ marginBottom: '20px' }}>
+          <div className="panel-top">
+            <h2>Promo Code</h2>
+            <span className="task-count">Use code for 1 month Pro</span>
+          </div>
+
+          <form onSubmit={redeemPromoCode} className="filters-row">
+            <input
+              className="cloud-input"
+              placeholder="Enter promo code"
+              value={promoCodeInput}
+              onChange={(e) => setPromoCodeInput(e.target.value)}
+            />
+            <button className="primary-btn big-btn" type="submit">
+              Apply Code
+            </button>
+            <div className="cloud-input" style={{ display: 'flex', alignItems: 'center' }}>
+              Code available: <strong style={{ marginLeft: 8 }}>newbie01</strong>
+            </div>
+          </form>
+        </section>
 
         {alerts.length > 0 && (
           <section className="alerts-panel">
