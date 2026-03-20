@@ -500,3 +500,18 @@ select.cloud-input option {
     grid-template-columns: 1fr;
   }
 }
+.task-media-box,
+.task-media-preview-box {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.task-media-preview {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+}

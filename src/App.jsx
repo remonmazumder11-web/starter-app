@@ -38,7 +38,6 @@ function formatTime(timeString) {
 
 function getTaskDueDateTime(dateString, timeString) {
   if (!dateString) return null
-
   const safeTime = timeString || '23:59'
   const [hour, minute] = safeTime.split(':')
   const due = new Date(dateString + 'T00:00:00')
@@ -148,6 +147,10 @@ export default function App() {
   const [confirmPassword, setConfirmPassword] = useState('')
 
   const [promoCodeInput, setPromoCodeInput] = useState('')
+  const [mediaFile, setMediaFile] = useState(null)
+  const [mediaPreview, setMediaPreview] = useState('')
+  const [mediaPreviewType, setMediaPreviewType] = useState('')
+  const [uploadingMedia, setUploadingMedia] = useState(false)
 
   const [form, setForm] = useState({
     title: '',
@@ -168,6 +171,65 @@ export default function App() {
     const audio = new Audio('/alert.mp3')
     audio.volume = 1
     audio.play().catch(() => {})
+  }
+
+  function clearMediaSelection() {
+    setMediaFile(null)
+    setMediaPreview('')
+    setMediaPreviewType('')
+  }
+
+  function handleMediaChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) {
+      clearMediaSelection()
+      return
+    }
+
+    const isImage = file.type.startsWith('image/')
+    const isVideo = file.type.startsWith('video/')
+
+    if (!isImage && !isVideo) {
+      showToast('Only image or video files are allowed', 'error')
+      e.target.value = ''
+      return
+    }
+
+    setMediaFile(file)
+    setMediaPreview(URL.createObjectURL(file))
+    setMediaPreviewType(isImage ? 'image' : 'video')
+  }
+
+  async function uploadTaskMedia() {
+    if (!mediaFile || !user) return { media_url: null, media_type: null }
+
+    const isImage = mediaFile.type.startsWith('image/')
+    const isVideo = mediaFile.type.startsWith('video/')
+    const extension = mediaFile.name.split('.').pop() || 'file'
+    const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`
+
+    setUploadingMedia(true)
+
+    const { error: uploadError } = await supabase.storage
+      .from('task-media')
+      .upload(fileName, mediaFile, {
+        cacheControl: '3600',
+        upsert: false,
+      })
+
+    if (uploadError) {
+      setUploadingMedia(false)
+      throw new Error(uploadError.message)
+    }
+
+    const { data } = supabase.storage.from('task-media').getPublicUrl(fileName)
+
+    setUploadingMedia(false)
+
+    return {
+      media_url: data.publicUrl,
+      media_type: isImage ? 'image' : isVideo ? 'video' : null,
+    }
   }
 
   async function checkAndFixPlan(userId, currentProfile) {
@@ -195,6 +257,12 @@ export default function App() {
 
     return currentProfile
   }
+
+  useEffect(() => {
+    return () => {
+      if (mediaPreview) URL.revokeObjectURL(mediaPreview)
+    }
+  }, [mediaPreview])
 
   useEffect(() => {
     if (!toast.show) return
@@ -609,6 +677,7 @@ export default function App() {
       projectName: '',
     })
     setEditingTaskId(null)
+    clearMediaSelection()
   }
 
   function startEdit(task) {
@@ -622,6 +691,9 @@ export default function App() {
       status: task.status || 'TODO',
       projectName: task.project_name || '',
     })
+    setMediaFile(null)
+    setMediaPreview(task.media_url || '')
+    setMediaPreviewType(task.media_type || '')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -644,71 +716,88 @@ export default function App() {
       return
     }
 
-    if (!editingTaskId && taskLimitReached) {
-      showToast(`Free plan allows only ${FREE_TASK_LIMIT} tasks`, 'error')
-      return
-    }
+    try {
+      let uploadedMedia = { media_url: null, media_type: null }
 
-    if (editingTaskId) {
-      const { error } = await supabase
-        .from('tasks')
-        .update({
-          title: form.title.trim(),
-          description: form.description.trim(),
-          due_date: form.dueDate || null,
-          due_time: form.dueTime || null,
-          priority: form.priority,
-          status: form.status,
-          project_name: form.projectName.trim(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', editingTaskId)
+      if (mediaFile) {
+        uploadedMedia = await uploadTaskMedia()
+      }
+
+      if (editingTaskId) {
+        const currentTask = tasks.find((task) => task.id === editingTaskId)
+
+        const { error } = await supabase
+          .from('tasks')
+          .update({
+            title: form.title.trim(),
+            description: form.description.trim(),
+            due_date: form.dueDate || null,
+            due_time: form.dueTime || null,
+            priority: form.priority,
+            status: form.status,
+            project_name: form.projectName.trim(),
+            media_url: uploadedMedia.media_url || currentTask?.media_url || null,
+            media_type: uploadedMedia.media_type || currentTask?.media_type || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingTaskId)
+
+        if (error) {
+          showToast(error.message, 'error')
+          return
+        }
+
+        showToast('Task updated', 'success')
+        resetForm()
+        fetchTasks(user.id)
+        return
+      }
+
+      if (taskLimitReached) {
+        showToast(`Free plan allows only ${FREE_TASK_LIMIT} tasks`, 'error')
+        return
+      }
+
+      const { error } = await supabase.from('tasks').insert({
+        user_id: user.id,
+        title: form.title.trim(),
+        description: form.description.trim(),
+        due_date: form.dueDate || null,
+        due_time: form.dueTime || null,
+        priority: form.priority,
+        status: form.status,
+        project_name: form.projectName.trim(),
+        media_url: uploadedMedia.media_url,
+        media_type: uploadedMedia.media_type,
+      })
 
       if (error) {
         showToast(error.message, 'error')
         return
       }
 
-      showToast('Task updated', 'success')
+      const currentCount = profile?.tasks_created_count || 0
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          tasks_created_count: currentCount + 1,
+        })
+        .eq('id', user.id)
+
+      if (profileError) {
+        showToast(profileError.message, 'error')
+        return
+      }
+
+      showToast('Task created', 'success')
       resetForm()
-      fetchTasks(user.id)
-      return
+      await fetchProfile(user.id)
+      await fetchTasks(user.id)
+    } catch (err) {
+      showToast(err.message || 'Media upload failed', 'error')
+      setUploadingMedia(false)
     }
-
-    const { error } = await supabase.from('tasks').insert({
-      user_id: user.id,
-      title: form.title.trim(),
-      description: form.description.trim(),
-      due_date: form.dueDate || null,
-      due_time: form.dueTime || null,
-      priority: form.priority,
-      status: form.status,
-      project_name: form.projectName.trim(),
-    })
-
-    if (error) {
-      showToast(error.message, 'error')
-      return
-    }
-
-    const currentCount = profile?.tasks_created_count || 0
-
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({
-        tasks_created_count: currentCount + 1,
-      })
-      .eq('id', user.id)
-
-    if (profileError) {
-      showToast(profileError.message, 'error')
-      return
-    }
-
-    showToast('Task created', 'success')
-    resetForm()
-    await fetchProfile(user.id)
-    await fetchTasks(user.id)
   }
 
   async function deleteTask(id) {
@@ -797,9 +886,7 @@ export default function App() {
         <section className="auth-card">
           <p className="auth-brand">Taskquil</p>
           <h1 className="auth-title">Reset your password</h1>
-          <p className="auth-subtitle">
-            Enter a strong new password for your account.
-          </p>
+          <p className="auth-subtitle">Enter a strong new password for your account.</p>
 
           <form onSubmit={handlePasswordRecoveryUpdate} className="auth-form">
             <input
@@ -1091,13 +1178,50 @@ export default function App() {
               onChange={(e) => setForm({ ...form, projectName: e.target.value })}
             />
 
+            <input
+              className="cloud-input"
+              type="file"
+              accept="image/*,video/*"
+              onChange={handleMediaChange}
+            />
+
+            {(mediaPreview || mediaPreviewType) && (
+              <div className="task-media-preview-box">
+                {mediaPreviewType === 'image' ? (
+                  <img
+                    src={mediaPreview}
+                    alt="Task preview"
+                    className="task-media-preview"
+                  />
+                ) : mediaPreviewType === 'video' ? (
+                  <video
+                    src={mediaPreview}
+                    controls
+                    className="task-media-preview"
+                  />
+                ) : null}
+
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  onClick={clearMediaSelection}
+                >
+                  Remove Media
+                </button>
+              </div>
+            )}
+
             <div className="form-actions">
               <button
                 className="primary-btn big-btn"
                 type="submit"
-                disabled={!editingTaskId && taskLimitReached}
+                disabled={uploadingMedia || (!editingTaskId && taskLimitReached)}
               >
-                {editingTaskId ? 'Save Changes' : 'Create Task'}
+                {uploadingMedia
+                  ? 'Uploading...'
+                  : editingTaskId
+                    ? 'Save Changes'
+                    : 'Create Task'}
               </button>
 
               {editingTaskId && (
@@ -1200,6 +1324,26 @@ export default function App() {
                           </span>
                         )}
                       </div>
+
+                      {task.media_url && task.media_type === 'image' && (
+                        <div className="task-media-box">
+                          <img
+                            src={task.media_url}
+                            alt={task.title}
+                            className="task-media-preview"
+                          />
+                        </div>
+                      )}
+
+                      {task.media_url && task.media_type === 'video' && (
+                        <div className="task-media-box">
+                          <video
+                            src={task.media_url}
+                            controls
+                            className="task-media-preview"
+                          />
+                        </div>
+                      )}
 
                       <div className="task-actions-premium">
                         <button
