@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 
 const FREE_TASK_LIMIT = 5
+const APP_URL = 'https://taskquil.vercel.app'
+const AUTH_REDIRECT_URL = `${APP_URL}/auth`
+const RESET_REDIRECT_URL = `${APP_URL}/reset-password`
 
 function formatDate(dateString) {
   if (!dateString) return ''
@@ -98,6 +101,12 @@ export default function App() {
   )
   const [audioReady, setAudioReady] = useState(false)
 
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [recoveryMode, setRecoveryMode] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -128,6 +137,11 @@ export default function App() {
   }, [toast])
 
   useEffect(() => {
+    const currentPath = window.location.pathname
+    if (currentPath === '/reset-password') {
+      setRecoveryMode(true)
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setUser(data.session?.user ?? null)
@@ -136,9 +150,19 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession)
       setUser(newSession?.user ?? null)
+
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecoveryMode(true)
+        setShowForgotPassword(false)
+        showToast('Set your new password now', 'info')
+      }
+
+      if (event === 'SIGNED_IN' && window.location.pathname === '/auth') {
+        window.history.replaceState({}, '', '/')
+      }
     })
 
     return () => subscription.unsubscribe()
@@ -306,12 +330,18 @@ export default function App() {
       const { error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          emailRedirectTo: AUTH_REDIRECT_URL,
+          data: {
+            app_name: 'Taskquil',
+          },
+        },
       })
 
       if (error) {
         showToast(error.message, 'error')
       } else {
-        showToast('Signup successful. Now log in.', 'success')
+        showToast('Check your email to confirm your account', 'success')
         setAuthMode('login')
       }
       return
@@ -323,6 +353,84 @@ export default function App() {
     })
 
     if (error) showToast(error.message, 'error')
+  }
+
+  async function resendConfirmationEmail() {
+    if (!email) {
+      showToast('Enter your email first', 'error')
+      return
+    }
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: AUTH_REDIRECT_URL,
+      },
+    })
+
+    if (error) {
+      showToast(error.message, 'error')
+      return
+    }
+
+    showToast('Confirmation email sent again', 'success')
+  }
+
+  async function sendResetPassword(e) {
+    e.preventDefault()
+
+    if (!forgotEmail) {
+      showToast('Enter your email address', 'error')
+      return
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+      redirectTo: RESET_REDIRECT_URL,
+    })
+
+    if (error) {
+      showToast(error.message, 'error')
+      return
+    }
+
+    showToast('Password reset email sent', 'success')
+    setShowForgotPassword(false)
+  }
+
+  async function handlePasswordRecoveryUpdate(e) {
+    e.preventDefault()
+
+    if (!newPassword || !confirmPassword) {
+      showToast('Enter and confirm your new password', 'error')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      showToast('Passwords do not match', 'error')
+      return
+    }
+
+    const passwordError = validatePassword(newPassword)
+    if (passwordError) {
+      showToast(passwordError, 'error')
+      return
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    })
+
+    if (error) {
+      showToast(error.message, 'error')
+      return
+    }
+
+    showToast('Password updated successfully', 'success')
+    setRecoveryMode(false)
+    setNewPassword('')
+    setConfirmPassword('')
+    window.history.replaceState({}, '', '/')
   }
 
   async function logout() {
@@ -537,6 +645,46 @@ export default function App() {
     )
   }
 
+  if (recoveryMode) {
+    return (
+      <div className="cloud-shell">
+        <div className="bg-orb orb-a" />
+        <div className="bg-orb orb-b" />
+        <div className="bg-orb orb-c" />
+
+        {toast.show && <div className={`toast toast-${toast.type}`}>{toast.text}</div>}
+
+        <section className="auth-card">
+          <p className="auth-brand">Taskquil</p>
+          <h1 className="auth-title">Reset your password</h1>
+          <p className="auth-subtitle">
+            Enter a strong new password for your account.
+          </p>
+
+          <form onSubmit={handlePasswordRecoveryUpdate} className="auth-form">
+            <input
+              className="cloud-input"
+              type="password"
+              placeholder="New password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+            <input
+              className="cloud-input"
+              type="password"
+              placeholder="Confirm new password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+            <button className="primary-btn big-btn" type="submit">
+              Update Password
+            </button>
+          </form>
+        </section>
+      </div>
+    )
+  }
+
   if (!session) {
     return (
       <div className="cloud-shell">
@@ -575,34 +723,69 @@ export default function App() {
                 : 'Login to access your cloud workspace.'}
             </p>
 
-            <form onSubmit={handleAuth} className="auth-form">
-              <input
-                className="cloud-input"
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <input
-                className="cloud-input"
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <button className="primary-btn big-btn" type="submit">
-                {authMode === 'signup' ? 'Sign Up' : 'Login'}
-              </button>
-            </form>
+            {!showForgotPassword ? (
+              <>
+                <form onSubmit={handleAuth} className="auth-form">
+                  <input
+                    className="cloud-input"
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                  <input
+                    className="cloud-input"
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <button className="primary-btn big-btn" type="submit">
+                    {authMode === 'signup' ? 'Sign Up' : 'Login'}
+                  </button>
+                </form>
 
-            <button
-              className="text-btn"
-              onClick={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')}
-            >
-              {authMode === 'signup'
-                ? 'Already have an account? Login'
-                : 'Need an account? Sign up'}
-            </button>
+                {authMode === 'signup' && (
+                  <button className="text-btn" onClick={resendConfirmationEmail}>
+                    Resend confirmation email
+                  </button>
+                )}
+
+                {authMode === 'login' && (
+                  <button className="text-btn" onClick={() => setShowForgotPassword(true)}>
+                    Forgot password?
+                  </button>
+                )}
+
+                <button
+                  className="text-btn"
+                  onClick={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')}
+                >
+                  {authMode === 'signup'
+                    ? 'Already have an account? Login'
+                    : 'Need an account? Sign up'}
+                </button>
+              </>
+            ) : (
+              <>
+                <form onSubmit={sendResetPassword} className="auth-form">
+                  <input
+                    className="cloud-input"
+                    type="email"
+                    placeholder="Enter your email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                  />
+                  <button className="primary-btn big-btn" type="submit">
+                    Send Reset Link
+                  </button>
+                </form>
+
+                <button className="text-btn" onClick={() => setShowForgotPassword(false)}>
+                  Back to login
+                </button>
+              </>
+            )}
           </section>
         </div>
       </div>
