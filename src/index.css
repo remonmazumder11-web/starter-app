@@ -504,6 +504,28 @@ select.cloud-input option {
   display: none;
 }
 
+.schedule-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.schedule-box {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #dbeafe;
+  letter-spacing: 0.02em;
+}
+
+.schedule-input {
+  min-height: 56px;
+}
+
 .media-actions-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -576,7 +598,17 @@ select.cloud-input option {
     gap: 10px;
   }
 
-  .media-actions-row {
+  .media-actions-row,
+  .schedule-group {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-label {
+    font-size: 0.98rem;
+  }
+
+  .schedule-input {
+    font-size: 1rem;
+    min-height: 58px;
   }
 }

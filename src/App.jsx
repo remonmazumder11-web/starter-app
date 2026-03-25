@@ -1109,8 +1109,9 @@ export default function App() {
             <button className="primary-btn big-btn" type="submit">
               Apply Code
             </button>
-            <div className="cloud-input" style={{ display: 'flex', alignItems: 'center' }}>
-              Code available: <strong style={{ marginLeft: 8 }}>newbie01</strong>
+            <div className="cloud-input file-name-box">
+              Code available:
+              <strong style={{ marginLeft: 8 }}>newbie01</strong>
             </div>
           </form>
         </section>
@@ -1165,19 +1166,33 @@ export default function App() {
               onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
 
-            <input
-              className="cloud-input"
-              type="date"
-              value={form.dueDate}
-              onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-            />
+            <div className="schedule-group">
+              <div className="schedule-box">
+                <label className="schedule-label" htmlFor="due-date">
+                  Due Date
+                </label>
+                <input
+                  id="due-date"
+                  className="cloud-input schedule-input"
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                />
+              </div>
 
-            <input
-              className="cloud-input"
-              type="time"
-              value={form.dueTime}
-              onChange={(e) => setForm({ ...form, dueTime: e.target.value })}
-            />
+              <div className="schedule-box">
+                <label className="schedule-label" htmlFor="due-time">
+                  Due Time
+                </label>
+                <input
+                  id="due-time"
+                  className="cloud-input schedule-input"
+                  type="time"
+                  value={form.dueTime}
+                  onChange={(e) => setForm({ ...form, dueTime: e.target.value })}
+                />
+              </div>
+            </div>
 
             <select
               className="cloud-input"
