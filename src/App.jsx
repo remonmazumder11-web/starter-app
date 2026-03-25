@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from './lib/supabase'
 
 const FREE_TASK_LIMIT = 5
@@ -125,6 +125,10 @@ export default function App() {
   const AUTH_REDIRECT_URL = `${BASE_URL}/auth`
   const RESET_REDIRECT_URL = `${BASE_URL}/reset-password`
 
+  const attachmentInputRef = useRef(null)
+  const cameraImageInputRef = useRef(null)
+  const cameraVideoInputRef = useRef(null)
+
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -190,6 +194,9 @@ export default function App() {
     setAttachmentPreview('')
     setAttachmentPreviewType('')
     setAttachmentPreviewName('')
+    if (attachmentInputRef.current) attachmentInputRef.current.value = ''
+    if (cameraImageInputRef.current) cameraImageInputRef.current.value = ''
+    if (cameraVideoInputRef.current) cameraVideoInputRef.current.value = ''
   }
 
   function handleAttachmentChange(e) {
@@ -197,6 +204,10 @@ export default function App() {
     if (!file) {
       clearAttachmentSelection()
       return
+    }
+
+    if (attachmentPreview && attachmentPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(attachmentPreview)
     }
 
     const objectUrl = URL.createObjectURL(file)
@@ -964,7 +975,7 @@ export default function App() {
             <p className="auth-subtitle">
               {authMode === 'signup'
                 ? 'Start with the free plan in seconds.'
-                : 'Login to access your cloud workspace.'}
+                : 'Login to access your command center.'}
             </p>
 
             {!showForgotPassword ? (
@@ -1048,7 +1059,7 @@ export default function App() {
         <header className="cloud-header">
           <div>
             <p className="auth-brand">Taskquil</p>
-            <h1 className="dashboard-title">Your Cloud Workspace</h1>
+            <h1 className="dashboard-title">Mission Control</h1>
             <p className="dashboard-subtitle">{user.email}</p>
 
             <div className="plan-badge-row">
@@ -1196,10 +1207,55 @@ export default function App() {
             />
 
             <input
-              className="cloud-input"
+              ref={attachmentInputRef}
+              className="hidden-file-input"
               type="file"
               onChange={handleAttachmentChange}
             />
+
+            <input
+              ref={cameraImageInputRef}
+              className="hidden-file-input"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleAttachmentChange}
+            />
+
+            <input
+              ref={cameraVideoInputRef}
+              className="hidden-file-input"
+              type="file"
+              accept="video/*"
+              capture="environment"
+              onChange={handleAttachmentChange}
+            />
+
+            <div className="media-actions-row">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => attachmentInputRef.current?.click()}
+              >
+                Add File
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => cameraImageInputRef.current?.click()}
+              >
+                Open Camera
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => cameraVideoInputRef.current?.click()}
+              >
+                Record Video
+              </button>
+            </div>
 
             {(attachmentPreview || attachmentPreviewName) && (
               <div className="task-media-preview-box">
@@ -1216,8 +1272,9 @@ export default function App() {
                     className="task-media-preview"
                   />
                 ) : (
-                  <div className="cloud-input" style={{ display: 'flex', alignItems: 'center' }}>
-                    Selected file: <strong style={{ marginLeft: 8 }}>{attachmentPreviewName}</strong>
+                  <div className="cloud-input file-name-box">
+                    Selected file:
+                    <strong style={{ marginLeft: 8 }}>{attachmentPreviewName}</strong>
                   </div>
                 )}
 
@@ -1324,7 +1381,7 @@ export default function App() {
                         )}
                         {task.due_date && (
                           <span
-                            className={`pill ${
+                            className={`pill time-pill ${
                               dueState === 'overdue'
                                 ? 'high'
                                 : dueState === 'today'
@@ -1371,8 +1428,7 @@ export default function App() {
                             href={task.media_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="secondary-btn"
-                            style={{ textDecoration: 'none', display: 'inline-block' }}
+                            className="secondary-btn file-link-btn"
                           >
                             Open File: {task.media_name || 'Attachment'}
                           </a>

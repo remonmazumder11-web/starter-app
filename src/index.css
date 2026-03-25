@@ -413,6 +413,13 @@ textarea {
   color: #fde68a;
 }
 
+.time-pill {
+  font-size: 0.92rem;
+  padding: 10px 14px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 .action-btn {
   border: none;
   border-radius: 14px;
@@ -493,6 +500,16 @@ select.cloud-input option {
   background: #1e293b;
 }
 
+.hidden-file-input {
+  display: none;
+}
+
+.media-actions-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
 .task-media-box,
 .task-media-preview-box {
   margin-top: 16px;
@@ -509,10 +526,57 @@ select.cloud-input option {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.file-link-btn {
+  text-decoration: none;
+  display: inline-block;
+  width: fit-content;
+}
+
+.file-name-box {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 980px) {
   .cloud-grid,
   .stats-row,
   .filters-row {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-shell {
+    padding: 16px;
+  }
+
+  .dashboard-title {
+    font-size: 2rem;
+  }
+
+  .task-title {
+    font-size: 1.12rem;
+    line-height: 1.4;
+  }
+
+  .task-meta {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .time-pill {
+    width: 100%;
+    font-size: 1rem;
+    padding: 12px 14px;
+  }
+
+  .task-actions-premium {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .media-actions-row {
     grid-template-columns: 1fr;
   }
 }
